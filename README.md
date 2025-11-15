@@ -585,3 +585,139 @@ resource "aws_route_table_association" "associate_route_table_2_to_subnet" {
   route_table_id = aws_route_table.vpc2_private_route_table.id
 }
 ```
+
+[section:circleci pipeline overview]
+
+### CircleCI Pipeline Overview
+CircleCI is acting as your Terraform automation pipeline.
+It deos 3 key things:
+- Runs Terraform Plan
+- Requires Manual Approval
+- Runs Terraform Apply
+
+[section:How to Configure CircleCI]
+### How to Configure CircleCI for this Project
+1- Your CircleCI pipeline must live in:
+```
+  .your-repo/
+ └── .circleci/
+     └── config.yml
+```
+2- Connect Github Repo to CircleCI
+- Go to https://app.circleci.com/
+- Login with GitHub
+- Choose your repository
+- Click Set Up Project
+  CircleCI automatically detects your config.yml.
+
+3- Add Environment Variables in CircleCI
+- Go to:
+Project Settings → Environment Variables
+Add the following variables:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEFAULT_REGION`
+- `TF_API_TOKEN`
+
+[section:pipeline implementation]
+
+### Pipeline Implementation
+1- **prepare Job**
+
+- This job runs in a Docker container that already has Terraform installed.
+- Pulls your Git repo (Terraform code).
+```
+jobs:
+  prepare:
+    docker:
+      - image: hashicorp/terraform:1.9.4
+    steps:
+      - checkout
+      - run:
+          name: Prepare Workspace
+          command: echo "Preparing workspace..."
+```
+2- **plan Job**
+
+This job runs Terraform plan and saves the plan output for later.
+- Creates Terraform credentials file
+- Inserts the Terraform Cloud API token (`$TF_API_TOKEN`)
+- This allows Terraform to authenticate with Terraform Cloud
+  ```
+  plan:
+    docker:
+      - image: hashicorp/terraform:1.9.4
+    steps:
+      - checkout
+      - run:
+          name: Set Terraform Credentials
+          command: |
+            mkdir -p ~/.terraform.d
+            echo '{"credentials":{"app.terraform.io":{"token":"'$TF_API_TOKEN'"}}}' > ~/.terraform.d/credentials.tfrc.json
+  ```
+  3- **Terrafrom Init**
+
+  - Downloads providers
+  - Connects to Terraform Cloud backend
+  - Configures remote state backend
+  - Makes AWS credentials available to Terraform providers
+    ```
+     - run:
+          name: Terraform Init
+          command: terraform init -upgrade
+      - run:
+          name: Set up AWS Credentials
+          command: |
+            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+            export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
+    ```
+    4- ** Terrafrom Plan**
+
+    - Creates a deployment plan
+    - Saves the plan to a file (`tfplan_tgw`)
+      ```
+       - run:    
+          name: Terraform Plan
+          command: terraform plan -out=tfplan_tgw
+      ```
+      5- ** Store Aritfacts in workspace**
+
+      This saves important Terraform files so the next job can use them
+      ```
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .terraform
+            - tfplan_tgw
+            - .terraform.lock.hcl
+      ```
+      6- ** Approval before Apply**
+
+      ```
+      workflows:
+         version: 2
+         deploy:
+           jobs:
+             - prepare
+             - plan
+             - approval:  # Add manual approval step
+                 type: approval
+                 requires:
+                   - plan
+             - apply:
+                 requires:
+                   - approval
+       ```
+  
+  [section: pipeline end]
+  
+  At The end of pipeline this ensures:
+  - No accidental deployments
+  - Immutable infrastructure deployment (plan → manual approval → apply)
+  - Consistency between planned and applied resources
+  - Secure authentication (AWS + Terraform Cloud)
+
+  [section:full architecture]
+
+   <img width="880" height="370" alt="image" src="https://github.com/user-attachments/assets/c06fd365-0bbc-4765-a3ec-a365a4ebc2d1" />

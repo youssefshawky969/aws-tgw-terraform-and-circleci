@@ -31,7 +31,8 @@ The AWS Transit Gateway simplifies this by acting as a **hub** for inter-VPC and
 - routes.tf
 - provider.tf
 - backend.tf
-  So Each `.tf` file represents a logical part of the infrastrucre.
+
+So Each `.tf` file represents a logical part of the infrastrucre.
 
 [section:implementation Steps]
 ### Implementation Steps
